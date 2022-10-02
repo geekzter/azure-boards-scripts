@@ -9,7 +9,7 @@
     This script requires a PAT to be set via the AZURE_DEVOPS_EXT_PAT environment variable or passed in as -Token parameter.
     
 .EXAMPLE
-    ./validate_backlog_order.ps1 -Organixzation myorg -Project MyProject -Team 'My Team'
+    ./validate_backlog_order.ps1 -Organization "https://dev.azure.com/myorg" -Project MyProject -Team "My Team"
 #> 
 #Requires -Version 7
 
@@ -40,10 +40,10 @@ if (!$Token) {
     exit 1
 }
 
-Write-Verbose "Authenticating to organization ${OrganizationUrl}..."
+Write-Host "Authenticating to organization ${OrganizationUrl}..."
 $Token | az devops login --organization $OrganizationUrl
 
-Write-Verbose "Retrieving Feature backlog for team '${Team}' in ${OrganizationUrl}/${Project}..."
+Write-Host "Retrieving Feature backlog for team '${Team}' in ${OrganizationUrl}/${Project}..."
 az devops invoke --org $OrganizationUrl `
                  --area work `
                  --api-version $apiVersion `
@@ -83,7 +83,7 @@ foreach ($responseItem in $workItemResponse) {
 Write-Debug "Work items in backlog for team '${Team}' in ${OrganizationUrl}/${Project}:"
 $workItems | Format-Table | Out-String | Write-Debug
 
-Write-Verbose "Iterating through work items to retrieve predecessor data..."
+Write-Host "Iterating through work items to retrieve predecessor data..."
 foreach ($workItem in $workItems) {
     "{0}/{1}" -f $workItem.Order, $workItems.Length | Set-Variable progressPrefix
 
@@ -142,10 +142,11 @@ foreach ($workItem in $workItems) {
 
 $workItems | Where-Object -Property InvalidOrder -eq $true | Set-Variable invalidOrderedWorkItems
 if ($invalidOrderedWorkItems) {
-    Write-Warning "Predecessor work items in invalid order:"
+    Write-Warning "Work items in incorrect order (predecessor after successor):"
     $invalidOrderedWorkItems | Format-Table -Property Order, Id, Title, InvalidPredecessors, InvalidSuccessors, AreaPath, Link
 }
 
+# Export CSV (can be imported to Excel)
 New-TemporaryFile | Select-Object -ExpandProperty FullName | Set-Variable csvFileName
 $csvFileName += ".csv"
 $workItems | Export-Csv -Path "$csvFileName" -NoTypeInformation
