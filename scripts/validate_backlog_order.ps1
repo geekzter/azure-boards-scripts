@@ -140,13 +140,13 @@ foreach ($workItem in $workItems) {
             $predecessor.Successors.Add($workItemId) | Out-Null
 
             if ($predecessor.Order -gt $workItem.Order) {
-                Write-Warning "$($PSStyle.Bold)$($PSStyle.Foreground.Red)✘$($PSStyle.Reset) Predecessor $predecessorId (order:$($predecessor.Order)) is below $workItemId (order:$($workItem.Order)) on backlog of team '${Team}'"
+                Write-Warning "$($PSStyle.Bold)$($PSStyle.Foreground.Red)✘$($PSStyle.Reset) Predecessor $predecessorId (order:$($predecessor.Order)) is below successor $workItemId (order:$($workItem.Order)) on backlog of team '${Team}'"
                 $predecessor.InvalidOrder = $true
                 $predecessor.InvalidSuccessors.Add($workItemId) | Out-Null
                 $workItem.InvalidOrder = $true
                 $workItem.InvalidPredecessors.Add($predecessorId) | Out-Null
             } else {
-                Write-Information "$($PSStyle.Bold)$($PSStyle.Foreground.Green)✔$($PSStyle.Reset) Predecessor $predecessorId (order:$($predecessor.Order)) is above $workItemId (order:$($workItem.Order)) on backlog of team '${Team}'"
+                Write-Information "$($PSStyle.Bold)$($PSStyle.Foreground.Green)✔$($PSStyle.Reset) Predecessor $predecessorId (order:$($predecessor.Order)) is above successor $workItemId (order:$($workItem.Order)) on backlog of team '${Team}'"
             }
         } else {
             Write-Information "Predecessor $predecessorId of $workItemId is not in backlog of team '${Team}'"
@@ -157,7 +157,8 @@ Write-Progress -Id 1 -Activity $progressActivity -Completed
 
 $workItems | Where-Object -Property InvalidOrder -eq $true | Set-Variable invalidOrderedWorkItems
 if ($invalidOrderedWorkItems) {
-    Write-Warning "`nWork items in incorrect order (predecessor after successor):"
+    Write-Host "`n"
+    Write-Warning "Work items in incorrect order (predecessor after successor):"
     $invalidOrderedWorkItems | Format-Table -Property Order, Id, Title, InvalidPredecessors, InvalidSuccessors, AreaPath, Link
 }
 
