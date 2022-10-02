@@ -11,7 +11,7 @@
 .EXAMPLE
     ./validate_backlog_order.ps1 -Organization "https://dev.azure.com/myorg" -Project MyProject -Team "My Team"
 #> 
-#Requires -Version 7
+#Requires -Version 7.2
 
 param ( 
     [parameter(Mandatory=$false)][string]$OrganizationUrl=$env:AZDO_ORG_SERVICE_URL,
@@ -28,17 +28,26 @@ if (!$OrganizationUrl) {
 }
 $OrganizationUrl = $OrganizationUrl -replace "/$","" # Strip trailing '/'
 if (!$Project) {
-    Write-Warning "Project is required. Please specify Project"
+    Write-Warning "Project is required. Please specify Project."
     exit 1
 }
 if (!$Team) {
-    Write-Warning "Team is required. Please specify Team"
+    Write-Warning "Team is required. Please specify Team."
     exit 1
 }
 if (!$Token) {
     Write-Warning "No access token found. Please specify -Token or set the AZURE_DEVOPS_EXT_PAT or AZDO_PERSONAL_ACCESS_TOKEN environment variable."
     exit 1
 }
+if (!(Get-Command az -ErrorAction SilentlyContinue)) {
+    Write-Warning "Azure CLI not found. Please install it."
+    exit 1
+}
+if (!(az extension list --query "[?name=='azure-devops'].version" -o tsv)) {
+    Write-Host "Adding Azure CLI extension 'azure-devops'..."
+    az extension add -n azure-devops -y
+}
+
 
 Write-Host "Authenticating to organization ${OrganizationUrl}..."
 $Token | az devops login --organization $OrganizationUrl
@@ -83,19 +92,23 @@ foreach ($responseItem in $workItemResponse) {
 Write-Debug "Work items in backlog for team '${Team}' in ${OrganizationUrl}/${Project}:"
 $workItems | Format-Table | Out-String | Write-Debug
 
-Write-Host "Iterating through work items to retrieve predecessor data..."
 foreach ($workItem in $workItems) {
-    "{0}/{1}" -f $workItem.Order, $workItems.Length | Set-Variable progressPrefix
+    $progressActivity = "$($PSStyle.Reset)Processing work items in backlog '${Team}'"
+    $progressPercentage = [math]::Round(100*$workItem.Order/$workItems.Length)
+    Write-Progress -Activity $progressActivity `
+                   -Id 1 `
+                   -PercentComplete $progressPercentage `
+                   -Status ("{0} 0f {1}" -f $workItem.Order, $workItems.Length)
 
     $workItemId = $workItem.Id
-    Write-Debug "${progressPrefix}: Retrieving predesessors for work item ${workItemId} (order:$($workItem.Order))..."
+    Write-Debug "Retrieving predesessors for work item ${workItemId} (order:$($workItem.Order))..."
     az boards work-item show --id $workItemId `
                              --org $env:AZDO_ORG_SERVICE_URL `
                              -o json `
                              | ConvertFrom-Json `
                              | Set-Variable workItemObject
 
-    Write-Debug "${progressPrefix}: workItemObject:"
+    Write-Debug "workItemObject:"
     $workItemObject.fields | Format-List | Out-String | Write-Debug
 
     $workItem.AreaPath      = $workItemObject.fields."System.AreaPath"
@@ -103,46 +116,48 @@ foreach ($workItem in $workItems) {
     $workItem.Parent        = $workItemObject.fields."System.Parent"
     $workItem.Title         = $workItemObject.fields."System.Title"
     $workItem.WorkItemType  = $workItemObject.fields."System.WorkItemType"
-    Write-Debug "${progressPrefix}: workItem:"
+    Write-Debug "workItem:"
     $workItem | Format-List | Out-String | Write-Debug
 
     $predecessorUrls = $null
     $workItemObject.relations | Where-Object -Property rel -eq "System.LinkTypes.Dependency-Reverse" `
                               | Select-Object -ExpandProperty url `
                               | Set-Variable predecessorUrls
+
     if ($predecessorUrls) {
-        Write-Debug "${progressPrefix}: Predecessors for ${workItemId}:"
+        Write-Debug "Predecessors for ${workItemId}:"
         $predecessorUrls | Write-Debug
     }
 
-    foreach ($predecessorUrl in $predecessorUrls) {
+    foreach ($predecessorUrl in $predecessorUrls) {        
         $predecessorId = $predecessorUrl.Split('/')[-1]
-        Write-Verbose "${progressPrefix}: $predecessorId is a predecessor of $workItemId"
+        Write-Verbose "$predecessorId is a predecessor of $workItemId"
         $workItem.Predecessors.Add($predecessorId) | Out-Null
         $predecessor = $null
         $workItems | Where-Object -Property Id -eq $predecessorId | Set-Variable predecessor
         if ($predecessor) {
-            Write-Debug "${progressPrefix}: Predecessor $predecessorId of $workItemId is also in backlog of team '${Team}'"
+            Write-Debug "Predecessor $predecessorId of $workItemId is also in backlog of team '${Team}'"
             $predecessor.Successors.Add($workItemId) | Out-Null
 
             if ($predecessor.Order -gt $workItem.Order) {
-                Write-Warning "${progressPrefix}: $($PSStyle.Bold)$($PSStyle.Foreground.Red)✘$($PSStyle.Reset) Predecessor $predecessorId (order:$($predecessor.Order)) is below $workItemId (order:$($workItem.Order)) on backlog of team '${Team}'"
+                Write-Warning "$($PSStyle.Bold)$($PSStyle.Foreground.Red)✘$($PSStyle.Reset) Predecessor $predecessorId (order:$($predecessor.Order)) is below $workItemId (order:$($workItem.Order)) on backlog of team '${Team}'"
                 $predecessor.InvalidOrder = $true
                 $predecessor.InvalidSuccessors.Add($workItemId) | Out-Null
                 $workItem.InvalidOrder = $true
                 $workItem.InvalidPredecessors.Add($predecessorId) | Out-Null
             } else {
-                Write-Information "${progressPrefix}: $($PSStyle.Bold)$($PSStyle.Foreground.Green)✔$($PSStyle.Reset) Predecessor $predecessorId (order:$($predecessor.Order)) is above $workItemId (order:$($workItem.Order)) on backlog of team '${Team}'"
+                Write-Information "$($PSStyle.Bold)$($PSStyle.Foreground.Green)✔$($PSStyle.Reset) Predecessor $predecessorId (order:$($predecessor.Order)) is above $workItemId (order:$($workItem.Order)) on backlog of team '${Team}'"
             }
         } else {
-            Write-Information "${progressPrefix}: Predecessor $predecessorId of $workItemId is not in backlog of team '${Team}'"
+            Write-Information "Predecessor $predecessorId of $workItemId is not in backlog of team '${Team}'"
         }
     }
 }
+Write-Progress -Id 1 -Activity $progressActivity -Completed
 
 $workItems | Where-Object -Property InvalidOrder -eq $true | Set-Variable invalidOrderedWorkItems
 if ($invalidOrderedWorkItems) {
-    Write-Warning "Work items in incorrect order (predecessor after successor):"
+    Write-Warning "`nWork items in incorrect order (predecessor after successor):"
     $invalidOrderedWorkItems | Format-Table -Property Order, Id, Title, InvalidPredecessors, InvalidSuccessors, AreaPath, Link
 }
 
