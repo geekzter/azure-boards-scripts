@@ -1,4 +1,3 @@
 # Azure Boards scripts
 
-- [Validate Backlog order](scripts/validate_backlog_order.ps1)    
-Check whether Backlog order honors predecessor <-> successor dependencies
+The scripts in this repo have been moved to [azure-devops-scripts](https://github.com/geekzter/azure-devops-scripts/tree/main/scripts/boards)
